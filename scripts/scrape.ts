@@ -20,7 +20,7 @@ puppeteer.use(StealthPlugin());
 const COUNTY = "Ventura";
 const STATE = "CA";
 const MAX_PAGES = 3;
-const DEFAULT_SOURCES = ["zillow", "realtor", "redfin", "trulia"];
+const DEFAULT_SOURCES = ["zillow", "trulia", "realtor", "redfin"];
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -97,7 +97,13 @@ async function scrapeZillow(browser: Browser): Promise<RawListing[]> {
         ? `https://www.zillow.com/${q}/`
         : `https://www.zillow.com/${q}/${p}_p/`;
       console.log(`  [Zillow] page ${p}: ${url}`);
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await delay(5000); // Wait for JS rendering
+
+      // Debug: log page title and HTML size
+      const title = await page.title();
+      const htmlLen = await page.evaluate(() => document.documentElement.innerHTML.length);
+      console.log(`  [Zillow] page ${p} loaded: "${title}" (${htmlLen} chars)`);
 
       const items = await page.evaluate(() => {
         const out: RawListing[] = [];
@@ -120,7 +126,7 @@ async function scrapeZillow(browser: Browser): Promise<RawListing[]> {
                 sqft: i.area || 0,
                 lotSize: i.lotAreaString || "N/A",
                 propertyType: i.homeType || "Unknown",
-                images: i.carouselPhotos?.map((x: { url: string }) => x.url) || [],
+                images: i.imgSrc ? [i.imgSrc] : i.carouselPhotos?.map((x: { url: string }) => x.url) || i.carouselPhotosComposable?.map((x: { url: string }) => x.url) || [],
                 detailUrl: i.detailUrl ? `https://www.zillow.com${i.detailUrl}` : "",
                 lat: i.latLong?.latitude,
                 lng: i.latLong?.longitude,
@@ -174,8 +180,8 @@ async function scrapeRealtor(browser: Browser): Promise<RawListing[]> {
         ? `https://www.realtor.com/realestateandhomes-search/${countySlug}_${stateSlug}`
         : `https://www.realtor.com/realestateandhomes-search/${countySlug}_${stateSlug}/pg-${p}`;
       console.log(`  [Realtor] page ${p}: ${url}`);
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-      await delay(3000);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await delay(5000);
 
       const items = await page.evaluate(() => {
         const out: RawListing[] = [];
@@ -249,8 +255,8 @@ async function scrapeRedfin(browser: Browser): Promise<RawListing[]> {
         ? `https://www.redfin.com/county/339/CA/Ventura-County/filter/sort=lo-days`
         : `https://www.redfin.com/county/339/CA/Ventura-County/filter/sort=lo-days/page-${p}`;
       console.log(`  [Redfin] page ${p}: ${url}`);
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-      await delay(4000);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await delay(6000);
 
       // Close popups
       await page.evaluate(() => {
@@ -317,8 +323,8 @@ async function scrapeTrulia(browser: Browser): Promise<RawListing[]> {
         ? `https://www.trulia.com/CA/Ventura_County/`
         : `https://www.trulia.com/CA/Ventura_County/${p}_p/`;
       console.log(`  [Trulia] page ${p}: ${url}`);
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-      await delay(3000);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await delay(5000);
 
       const items = await page.evaluate(() => {
         const out: RawListing[] = [];
