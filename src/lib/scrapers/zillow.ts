@@ -1,107 +1,187 @@
-import axios from "axios";
-import * as cheerio from "cheerio";
 import type { Listing, ScrapeResult } from "@/types/listing";
-
-function generateSlug(address: string, city: string): string {
-  return `${address}-${city}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-function generateId(address: string, source: string): string {
-  const raw = `${source}-${address}`;
-  let hash = 0;
-  for (let i = 0; i < raw.length; i++) {
-    const char = raw.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
+import { getBrowser, createPage, generateSlug, generateId, delay } from "./browser";
 
 export async function scrapeZillow(
   county: string,
   state: string,
-  maxPages: number = 5
+  maxPages: number = 3
 ): Promise<ScrapeResult> {
   const listings: Listing[] = [];
   const errors: string[] = [];
-  const searchQuery = `${county}-county-${state}`.toLowerCase().replace(/\s+/g, "-");
+  const searchQuery = `${county}-county-${state.toLowerCase().replace(/\s+/g, "-")}`;
+
+  const browser = await getBrowser();
 
   for (let page = 1; page <= maxPages; page++) {
+    const pageObj = await createPage(browser);
+
     try {
-      const url = `https://www.zillow.com/${searchQuery}/rentals/${page}_p/`;
+      const url =
+        page === 1
+          ? `https://www.zillow.com/${searchQuery}/`
+          : `https://www.zillow.com/${searchQuery}/${page}_p/`;
 
-      const response = await axios.get(url, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5",
-        },
-        timeout: 15000,
+      console.log(`[Zillow] Scraping page ${page}: ${url}`);
+      await pageObj.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+
+      // Wait for listings to load
+      await pageObj.waitForSelector(
+        'article[data-test="property-card"], [data-test="property-card-link"], .property-card-data',
+        { timeout: 10000 }
+      ).catch(() => {
+        // Try alternate selector
       });
 
-      const $ = cheerio.load(response.data);
+      // Extract listing data from the page's embedded JSON or DOM
+      const pageListings = await pageObj.evaluate(() => {
+        const results: Array<{
+          address: string;
+          city: string;
+          state: string;
+          zip: string;
+          price: number;
+          bedrooms: number;
+          bathrooms: number;
+          sqft: number;
+          lotSize: string;
+          yearBuilt: number;
+          propertyType: string;
+          status: string;
+          description: string;
+          images: string[];
+          detailUrl: string;
+          lat?: number;
+          lng?: number;
+        }> = [];
 
-      // Zillow embeds listing data in a script tag as JSON
-      const scriptTags = $('script[type="application/json"]');
-      scriptTags.each((_, el) => {
-        try {
-          const jsonText = $(el).html();
-          if (!jsonText) return;
+        // Method 1: Parse __NEXT_DATA__ or embedded JSON
+        const scripts = document.querySelectorAll('script[type="application/json"]');
+        for (const script of scripts) {
+          try {
+            const data = JSON.parse(script.textContent || "");
+            // Zillow stores search results in various nested paths
+            const searchResults =
+              data?.props?.pageProps?.searchPageState?.cat1?.searchResults?.listResults ||
+              data?.cat1?.searchResults?.listResults ||
+              [];
 
-          const data = JSON.parse(jsonText);
-          const results =
-            data?.props?.pageProps?.searchPageState?.cat1?.searchResults
-              ?.listResults || [];
-
-          for (const item of results) {
-            const address = item.address || item.streetAddress || "";
-            const city = item.addressCity || county;
-
-            const listing: Listing = {
-              id: generateId(address, "zillow"),
-              slug: generateSlug(address, city),
-              address,
-              city,
-              state: item.addressState || state,
-              zip: item.addressZipcode || "",
-              county,
-              price: item.unformattedPrice || item.price || 0,
-              bedrooms: item.beds || 0,
-              bathrooms: item.baths || 0,
-              sqft: item.area || 0,
-              lotSize: item.lotAreaString || "N/A",
-              yearBuilt: item.yearBuilt || 0,
-              propertyType: item.homeType || "Unknown",
-              status: item.homeStatus === "FOR_SALE" ? "active" : "pending",
-              description: item.description || "",
-              images: item.carouselPhotos?.map((p: { url: string }) => p.url) || [],
-              features: [],
-              listingDate: new Date().toISOString(),
-              source: "zillow",
-              sourceUrl: item.detailUrl
-                ? `https://www.zillow.com${item.detailUrl}`
-                : "",
-              coordinates: item.latLong
-                ? { lat: item.latLong.latitude, lng: item.latLong.longitude }
-                : undefined,
-            };
-
-            listings.push(listing);
+            for (const item of searchResults) {
+              if (!item.address && !item.streetAddress) continue;
+              results.push({
+                address: item.address || item.streetAddress || "",
+                city: item.addressCity || "",
+                state: item.addressState || "",
+                zip: item.addressZipcode || "",
+                price: item.unformattedPrice || item.price || 0,
+                bedrooms: item.beds || 0,
+                bathrooms: item.baths || 0,
+                sqft: item.area || 0,
+                lotSize: item.lotAreaString || "N/A",
+                yearBuilt: 0,
+                propertyType: item.homeType || "Unknown",
+                status: item.homeStatus === "FOR_SALE" ? "active" : "pending",
+                description: "",
+                images: item.carouselPhotos?.map((p: { url: string }) => p.url) || [],
+                detailUrl: item.detailUrl ? `https://www.zillow.com${item.detailUrl}` : "",
+                lat: item.latLong?.latitude,
+                lng: item.latLong?.longitude,
+              });
+            }
+          } catch {
+            // Not the right script tag
           }
-        } catch {
-          // Not the right script tag, skip
         }
+
+        // Method 2: Parse from DOM if JSON parsing failed
+        if (results.length === 0) {
+          const cards = document.querySelectorAll(
+            '[data-test="property-card"], .list-card, .property-card'
+          );
+          for (const card of cards) {
+            const addressEl = card.querySelector(
+              '[data-test="property-card-addr"], .list-card-addr, address'
+            );
+            const priceEl = card.querySelector(
+              '[data-test="property-card-price"], .list-card-price, span[data-test="property-card-price"]'
+            );
+            const linkEl = card.querySelector("a[href]");
+            const imgEl = card.querySelector("img");
+
+            const addressText = addressEl?.textContent?.trim() || "";
+            const priceText = priceEl?.textContent?.trim() || "";
+            const price = parseInt(priceText.replace(/[^0-9]/g, ""), 10) || 0;
+
+            // Parse beds/baths/sqft from card details
+            const detailText = card.textContent || "";
+            const bedsMatch = detailText.match(/(\d+)\s*(?:bd|bed|bds)/i);
+            const bathsMatch = detailText.match(/(\d+(?:\.\d+)?)\s*(?:ba|bath)/i);
+            const sqftMatch = detailText.match(/([\d,]+)\s*(?:sqft|sq\s*ft)/i);
+
+            if (addressText && price > 0) {
+              const parts = addressText.split(",").map((s: string) => s.trim());
+              results.push({
+                address: parts[0] || addressText,
+                city: parts[1] || "",
+                state: parts[2]?.replace(/\d+/g, "").trim() || "",
+                zip: parts[2]?.match(/\d{5}/)?.[0] || "",
+                price,
+                bedrooms: bedsMatch ? parseInt(bedsMatch[1]) : 0,
+                bathrooms: bathsMatch ? parseFloat(bathsMatch[1]) : 0,
+                sqft: sqftMatch ? parseInt(sqftMatch[1].replace(/,/g, "")) : 0,
+                lotSize: "N/A",
+                yearBuilt: 0,
+                propertyType: "Unknown",
+                status: "active",
+                description: "",
+                images: imgEl?.src ? [imgEl.src] : [],
+                detailUrl: (linkEl as HTMLAnchorElement)?.href || "",
+              });
+            }
+          }
+        }
+
+        return results;
       });
 
-      // Rate limiting
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      for (const item of pageListings) {
+        const city = item.city || county;
+        listings.push({
+          id: generateId(item.address, "zillow"),
+          slug: generateSlug(item.address, city),
+          address: item.address,
+          city,
+          state: item.state || state,
+          zip: item.zip,
+          county,
+          price: item.price,
+          bedrooms: item.bedrooms,
+          bathrooms: item.bathrooms,
+          sqft: item.sqft,
+          lotSize: item.lotSize,
+          yearBuilt: item.yearBuilt,
+          propertyType: item.propertyType,
+          status: item.status as "active" | "pending" | "sold",
+          description: item.description,
+          images: item.images,
+          features: [],
+          listingDate: new Date().toISOString(),
+          source: "zillow",
+          sourceUrl: item.detailUrl,
+          coordinates:
+            item.lat && item.lng ? { lat: item.lat, lng: item.lng } : undefined,
+        });
+      }
+
+      console.log(`[Zillow] Page ${page}: found ${pageListings.length} listings`);
     } catch (err) {
-      errors.push(`Zillow page ${page}: ${err instanceof Error ? err.message : "Unknown error"}`);
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      errors.push(`Zillow page ${page}: ${msg}`);
+      console.error(`[Zillow] Page ${page} error:`, msg);
+    } finally {
+      await pageObj.close();
     }
+
+    await delay(3000 + Math.random() * 2000);
   }
 
   return {

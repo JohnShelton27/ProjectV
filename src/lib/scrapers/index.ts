@@ -1,53 +1,78 @@
-import type { Listing, ScraperConfig, ScrapeResult } from "@/types/listing";
+import type { Listing, ScrapeResult } from "@/types/listing";
 import { scrapeZillow } from "./zillow";
 import { scrapeRealtor } from "./realtor";
-import { scrapeMLS } from "./mls";
+import { scrapeTrulia } from "./trulia";
+import { scrapeRedfin } from "./redfin";
+import { closeBrowser } from "./browser";
 
-export async function scrapeAll(config: ScraperConfig): Promise<{
+const scraperMap: Record<string, (county: string, state: string, maxPages: number) => Promise<ScrapeResult>> = {
+  zillow: scrapeZillow,
+  realtor: scrapeRealtor,
+  trulia: scrapeTrulia,
+  redfin: scrapeRedfin,
+};
+
+export async function scrapeAll(config: {
+  county: string;
+  state: string;
+  maxPages: number;
+  sources: string[];
+}): Promise<{
   listings: Listing[];
   results: ScrapeResult[];
 }> {
-  const scraperMap = {
-    zillow: scrapeZillow,
-    realtor: scrapeRealtor,
-    mls: scrapeMLS,
-  };
-
-  const promises = config.sources.map((source) =>
-    scraperMap[source](config.county, config.state, config.maxPages)
-  );
-
-  const results = await Promise.allSettled(promises);
-  const allListings: Listing[] = [];
   const allResults: ScrapeResult[] = [];
+  const allListings: Listing[] = [];
 
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      allResults.push(result.value);
-      allListings.push(...result.value.listings);
-    } else {
+  // Run scrapers sequentially to avoid overwhelming the browser
+  for (const source of config.sources) {
+    const scraper = scraperMap[source];
+    if (!scraper) {
       allResults.push({
         listings: [],
         totalFound: 0,
-        source: "unknown",
+        source,
         scrapedAt: new Date().toISOString(),
-        errors: [result.reason?.message || "Scraper failed"],
+        errors: [`Unknown source: ${source}`],
+      });
+      continue;
+    }
+
+    try {
+      console.log(`Starting ${source} scraper...`);
+      const result = await scraper(config.county, config.state, config.maxPages);
+      allResults.push(result);
+      allListings.push(...result.listings);
+      console.log(`${source}: found ${result.totalFound} listings, ${result.errors.length} errors`);
+    } catch (err) {
+      allResults.push({
+        listings: [],
+        totalFound: 0,
+        source,
+        scrapedAt: new Date().toISOString(),
+        errors: [err instanceof Error ? err.message : "Scraper crashed"],
       });
     }
   }
 
-  // Deduplicate by address
+  // Close the shared browser instance
+  await closeBrowser();
+
+  // Deduplicate by normalized address
   const seen = new Set<string>();
   const deduplicated = allListings.filter((listing) => {
-    const key = listing.address.toLowerCase().replace(/\s+/g, "");
-    if (seen.has(key)) return false;
+    const key = listing.address.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+
+  console.log(`Total: ${deduplicated.length} unique listings from ${config.sources.length} sources`);
 
   return { listings: deduplicated, results: allResults };
 }
 
 export { scrapeZillow } from "./zillow";
 export { scrapeRealtor } from "./realtor";
-export { scrapeMLS } from "./mls";
+export { scrapeTrulia } from "./trulia";
+export { scrapeRedfin } from "./redfin";

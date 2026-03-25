@@ -1,14 +1,34 @@
-import { NextResponse } from "next/server";
-import { scrapeAll } from "@/lib/scrapers";
+import { NextRequest, NextResponse } from "next/server";
 import { saveListings } from "@/lib/listings-store";
 import { SCRAPER_CONFIG } from "@/lib/config";
 
-export async function POST() {
+// Puppeteer scraping can take a while — increase timeout
+export const maxDuration = 300; // 5 minutes
+
+export async function POST(request: NextRequest) {
   try {
-    const { listings, results } = await scrapeAll(SCRAPER_CONFIG);
+    // Dynamic import to avoid bundling puppeteer at build time
+    const { scrapeAll } = await import("@/lib/scrapers");
+
+    // Allow overriding sources via request body
+    let sources = SCRAPER_CONFIG.sources;
+    try {
+      const body = await request.json();
+      if (body.sources && Array.isArray(body.sources)) {
+        sources = body.sources;
+      }
+    } catch {
+      // No body or invalid JSON, use defaults
+    }
+
+    const config = { ...SCRAPER_CONFIG, sources };
+
+    console.log(`Starting scrape for ${config.county}, ${config.state} from: ${sources.join(", ")}`);
+    const { listings, results } = await scrapeAll(config);
 
     if (listings.length > 0) {
       await saveListings(listings);
+      console.log(`Saved ${listings.length} listings to database`);
     }
 
     return NextResponse.json({
@@ -21,6 +41,7 @@ export async function POST() {
       })),
     });
   } catch (error) {
+    console.error("Scrape failed:", error);
     return NextResponse.json(
       {
         success: false,

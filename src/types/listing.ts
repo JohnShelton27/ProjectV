@@ -18,7 +18,7 @@ export interface Listing {
   images: string[];
   features: string[];
   listingDate: string;
-  source: "zillow" | "realtor" | "mls";
+  source: string;
   sourceUrl: string;
   agent?: {
     name: string;
@@ -40,7 +40,7 @@ export interface ScraperConfig {
   county: string;
   state: string;
   maxPages: number;
-  sources: ("zillow" | "realtor" | "mls")[];
+  sources: string[];
 }
 
 export interface ScrapeResult {

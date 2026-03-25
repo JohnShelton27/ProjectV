@@ -1,117 +1,180 @@
-import axios from "axios";
 import type { Listing, ScrapeResult } from "@/types/listing";
-
-function generateSlug(address: string, city: string): string {
-  return `${address}-${city}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-function generateId(address: string, source: string): string {
-  const raw = `${source}-${address}`;
-  let hash = 0;
-  for (let i = 0; i < raw.length; i++) {
-    const char = raw.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
+import { getBrowser, createPage, generateSlug, generateId, delay } from "./browser";
 
 export async function scrapeRealtor(
   county: string,
   state: string,
-  maxPages: number = 5
+  maxPages: number = 3
 ): Promise<ScrapeResult> {
   const listings: Listing[] = [];
   const errors: string[] = [];
 
+  const stateSlug = state.toLowerCase().replace(/\s+/g, "-");
+  const countySlug = `${county.toLowerCase().replace(/\s+/g, "-")}-county`;
+
+  const browser = await getBrowser();
+
   for (let page = 1; page <= maxPages; page++) {
+    const pageObj = await createPage(browser);
+
     try {
-      // Realtor.com has a public-facing API used by their frontend
-      const stateAbbr = state.length === 2 ? state : getStateAbbreviation(state);
-      const url = `https://www.realtor.com/api/v1/hulk_main_srp`;
+      const url =
+        page === 1
+          ? `https://www.realtor.com/realestateandhomes-search/${countySlug}_${stateSlug}`
+          : `https://www.realtor.com/realestateandhomes-search/${countySlug}_${stateSlug}/pg-${page}`;
 
-      const params = {
-        client_id: "rdc-x",
-        schema: "vesta",
-        query: JSON.stringify({
-          status: ["for_sale"],
-          county: county,
-          state_code: stateAbbr,
-          offset: (page - 1) * 42,
-          limit: 42,
-          sort: { direction: "desc", field: "list_date" },
-        }),
-      };
+      console.log(`[Realtor] Scraping page ${page}: ${url}`);
+      await pageObj.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
 
-      const response = await axios.get(url, {
-        params,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept: "application/json",
-        },
-        timeout: 15000,
+      await delay(3000);
+
+      const pageListings = await pageObj.evaluate(() => {
+        const results: Array<{
+          address: string;
+          city: string;
+          state: string;
+          zip: string;
+          price: number;
+          bedrooms: number;
+          bathrooms: number;
+          sqft: number;
+          lotSize: string;
+          propertyType: string;
+          images: string[];
+          detailUrl: string;
+          lat?: number;
+          lng?: number;
+        }> = [];
+
+        // Method 1: Parse __NEXT_DATA__
+        const nextDataEl = document.querySelector("#__NEXT_DATA__");
+        if (nextDataEl) {
+          try {
+            const data = JSON.parse(nextDataEl.textContent || "");
+            const homes =
+              data?.props?.pageProps?.properties ||
+              data?.props?.pageProps?.searchResults?.home_search?.results ||
+              [];
+
+            for (const home of homes) {
+              const loc = home.location || {};
+              const addr = loc.address || {};
+              results.push({
+                address: addr.line || home.address?.line || "",
+                city: addr.city || home.address?.city || "",
+                state: addr.state_code || home.address?.state_code || "",
+                zip: addr.postal_code || home.address?.postal_code || "",
+                price: home.list_price || home.price || 0,
+                bedrooms: home.description?.beds || home.beds || 0,
+                bathrooms: home.description?.baths || home.baths || 0,
+                sqft: home.description?.sqft || home.sqft || 0,
+                lotSize: home.description?.lot_sqft
+                  ? `${(home.description.lot_sqft / 43560).toFixed(2)} acres`
+                  : "N/A",
+                propertyType: home.description?.type || home.prop_type || "Unknown",
+                images: home.photos?.map((p: { href: string }) => p.href).filter(Boolean) || [],
+                detailUrl: home.permalink
+                  ? `https://www.realtor.com/realestateandhomes-detail/${home.permalink}`
+                  : home.href
+                    ? `https://www.realtor.com${home.href}`
+                    : "",
+                lat: loc.address?.coordinate?.lat,
+                lng: loc.address?.coordinate?.lon,
+              });
+            }
+          } catch {
+            // JSON parsing failed
+          }
+        }
+
+        // Method 2: DOM fallback
+        if (results.length === 0) {
+          const cards = document.querySelectorAll(
+            '[data-testid="property-card"], .BasePropertyCard_propertyCardWrap__J0xUj, .property-card'
+          );
+
+          for (const card of cards) {
+            const priceEl = card.querySelector(
+              '[data-testid="card-price"], .card-price, .PropertyCardPrice'
+            );
+            const addressEl = card.querySelector(
+              '[data-testid="card-address"], .card-address'
+            );
+            const linkEl = card.querySelector("a[href*='realestateandhomes-detail']");
+            const imgEl = card.querySelector("img");
+
+            const priceText = priceEl?.textContent?.trim() || "";
+            const price = parseInt(priceText.replace(/[^0-9]/g, ""), 10) || 0;
+            const addressText = addressEl?.textContent?.trim() || "";
+
+            if (!addressText || price === 0) continue;
+
+            const cardText = card.textContent || "";
+            const bedsMatch = cardText.match(/(\d+)\s*(?:bed|bd)/i);
+            const bathsMatch = cardText.match(/(\d+(?:\.\d+)?)\s*(?:bath|ba)/i);
+            const sqftMatch = cardText.match(/([\d,]+)\s*(?:sqft|sq\s*ft)/i);
+
+            const parts = addressText.split(",").map((s: string) => s.trim());
+
+            results.push({
+              address: parts[0] || addressText,
+              city: parts[1] || "",
+              state: parts[2]?.replace(/\d+/g, "").trim() || "",
+              zip: addressText.match(/\d{5}/)?.[0] || "",
+              price,
+              bedrooms: bedsMatch ? parseInt(bedsMatch[1]) : 0,
+              bathrooms: bathsMatch ? parseFloat(bathsMatch[1]) : 0,
+              sqft: sqftMatch ? parseInt(sqftMatch[1].replace(/,/g, "")) : 0,
+              lotSize: "N/A",
+              propertyType: "Unknown",
+              images: imgEl ? [(imgEl as HTMLImageElement).src] : [],
+              detailUrl: (linkEl as HTMLAnchorElement)?.href || "",
+            });
+          }
+        }
+
+        return results;
       });
 
-      const results = response.data?.data?.home_search?.results || [];
-
-      for (const item of results) {
-        const address = item.location?.address?.line || "";
-        const city = item.location?.address?.city || county;
-
-        const listing: Listing = {
-          id: generateId(address, "realtor"),
-          slug: generateSlug(address, city),
-          address,
+      for (const item of pageListings) {
+        const city = item.city || county;
+        listings.push({
+          id: generateId(item.address, "realtor"),
+          slug: generateSlug(item.address, city),
+          address: item.address,
           city,
-          state: item.location?.address?.state_code || stateAbbr,
-          zip: item.location?.address?.postal_code || "",
+          state: item.state || state,
+          zip: item.zip,
           county,
-          price: item.list_price || 0,
-          bedrooms: item.description?.beds || 0,
-          bathrooms: item.description?.baths_consolidated || item.description?.baths || 0,
-          sqft: item.description?.sqft || 0,
-          lotSize: item.description?.lot_sqft
-            ? `${(item.description.lot_sqft / 43560).toFixed(2)} acres`
-            : "N/A",
-          yearBuilt: item.description?.year_built || 0,
-          propertyType: item.description?.type || "Unknown",
+          price: item.price,
+          bedrooms: item.bedrooms,
+          bathrooms: item.bathrooms,
+          sqft: item.sqft,
+          lotSize: item.lotSize,
+          yearBuilt: 0,
+          propertyType: item.propertyType,
           status: "active",
-          description: item.description?.text || "",
-          images: item.photos?.map((p: { href: string }) => p.href) || [],
-          features: item.tags || [],
-          listingDate: item.list_date || new Date().toISOString(),
+          description: "",
+          images: item.images,
+          features: [],
+          listingDate: new Date().toISOString(),
           source: "realtor",
-          sourceUrl: item.href
-            ? `https://www.realtor.com${item.href}`
-            : "",
-          agent: item.advertisers?.[0]
-            ? {
-                name: item.advertisers[0].name || "",
-                phone: item.advertisers[0].phone || undefined,
-                company: item.advertisers[0].office?.name || undefined,
-              }
-            : undefined,
-          coordinates: item.location?.address?.coordinate
-            ? {
-                lat: item.location.address.coordinate.lat,
-                lng: item.location.address.coordinate.lon,
-              }
-            : undefined,
-        };
-
-        listings.push(listing);
+          sourceUrl: item.detailUrl,
+          coordinates:
+            item.lat && item.lng ? { lat: item.lat, lng: item.lng } : undefined,
+        });
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      console.log(`[Realtor] Page ${page}: found ${pageListings.length} listings`);
     } catch (err) {
-      errors.push(
-        `Realtor page ${page}: ${err instanceof Error ? err.message : "Unknown error"}`
-      );
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      errors.push(`Realtor page ${page}: ${msg}`);
+      console.error(`[Realtor] Page ${page} error:`, msg);
+    } finally {
+      await pageObj.close();
     }
+
+    await delay(3000 + Math.random() * 2000);
   }
 
   return {
@@ -121,24 +184,4 @@ export async function scrapeRealtor(
     scrapedAt: new Date().toISOString(),
     errors,
   };
-}
-
-function getStateAbbreviation(state: string): string {
-  const states: Record<string, string> = {
-    alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR",
-    california: "CA", colorado: "CO", connecticut: "CT", delaware: "DE",
-    florida: "FL", georgia: "GA", hawaii: "HI", idaho: "ID",
-    illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS",
-    kentucky: "KY", louisiana: "LA", maine: "ME", maryland: "MD",
-    massachusetts: "MA", michigan: "MI", minnesota: "MN", mississippi: "MS",
-    missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV",
-    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM",
-    "new york": "NY", "north carolina": "NC", "north dakota": "ND",
-    ohio: "OH", oklahoma: "OK", oregon: "OR", pennsylvania: "PA",
-    "rhode island": "RI", "south carolina": "SC", "south dakota": "SD",
-    tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT",
-    virginia: "VA", washington: "WA", "west virginia": "WV",
-    wisconsin: "WI", wyoming: "WY",
-  };
-  return states[state.toLowerCase()] || state;
 }
