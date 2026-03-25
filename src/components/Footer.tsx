@@ -10,7 +10,7 @@ export default function Footer() {
             reserved.
           </p>
           <p className="text-xs">
-            Data sourced from public listings. Not affiliated with any MLS.
+            Information deemed reliable but not guaranteed.
           </p>
         </div>
       </div>

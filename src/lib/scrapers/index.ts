@@ -3,6 +3,7 @@ import { scrapeZillow } from "./zillow";
 import { scrapeRealtor } from "./realtor";
 import { scrapeTrulia } from "./trulia";
 import { scrapeRedfin } from "./redfin";
+import { scrapeMlsListings } from "./mlslistings";
 import { closeBrowser } from "./browser";
 
 const scraperMap: Record<string, (county: string, state: string, maxPages: number) => Promise<ScrapeResult>> = {
@@ -10,6 +11,7 @@ const scraperMap: Record<string, (county: string, state: string, maxPages: numbe
   realtor: scrapeRealtor,
   trulia: scrapeTrulia,
   redfin: scrapeRedfin,
+  mlslistings: scrapeMlsListings,
 };
 
 export async function scrapeAll(config: {
@@ -76,3 +78,4 @@ export { scrapeZillow } from "./zillow";
 export { scrapeRealtor } from "./realtor";
 export { scrapeTrulia } from "./trulia";
 export { scrapeRedfin } from "./redfin";
+export { scrapeMlsListings } from "./mlslistings";

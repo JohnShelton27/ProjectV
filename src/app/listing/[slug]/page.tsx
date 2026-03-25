@@ -2,11 +2,14 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getListingBySlug, loadListings } from "@/lib/listings-store";
 import { formatPrice, formatNumber, formatDate, getStatusColor } from "@/lib/format";
+import ImageGallery from "@/components/ImageGallery";
+import ContactForm from "@/components/ContactForm";
+import PageTracker from "@/components/PageTracker";
 
 export const dynamic = "force-dynamic";
 
 export async function generateStaticParams() {
-  const listings = await loadListings();
+  const { listings } = await loadListings();
   return listings.map((listing) => ({ slug: listing.slug }));
 }
 
@@ -22,11 +25,9 @@ export default async function ListingPage({
     notFound();
   }
 
-  const placeholderImg =
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='500' fill='%23e2e8f0'%3E%3Crect width='800' height='500'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='24' fill='%2394a3b8'%3ENo Image Available%3C/text%3E%3C/svg%3E";
-
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <PageTracker listingSlug={slug} />
       {/* Back link */}
       <Link
         href="/"
@@ -36,29 +37,7 @@ export default async function ListingPage({
       </Link>
 
       {/* Image Gallery */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-8 rounded-xl overflow-hidden">
-        <div className="md:row-span-2">
-          <img
-            src={listing.images[0] || placeholderImg}
-            alt={listing.address}
-            className="w-full h-full object-cover min-h-[300px]"
-          />
-        </div>
-        {listing.images.slice(1, 3).map((img, i) => (
-          <div key={i}>
-            <img
-              src={img}
-              alt={`${listing.address} - ${i + 2}`}
-              className="w-full h-[200px] object-cover"
-            />
-          </div>
-        ))}
-        {listing.images.length <= 1 && (
-          <div className="bg-slate-200 flex items-center justify-center h-[200px]">
-            <span className="text-slate-400">No additional photos</span>
-          </div>
-        )}
-      </div>
+      <ImageGallery images={listing.images} alt={listing.address} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main content */}
@@ -70,9 +49,6 @@ export default async function ListingPage({
                 className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${getStatusColor(listing.status)}`}
               >
                 {listing.status}
-              </span>
-              <span className="text-xs text-slate-400 uppercase">
-                via {listing.source}
               </span>
             </div>
             <h1 className="text-3xl font-bold text-slate-900 mb-1">
@@ -151,17 +127,10 @@ export default async function ListingPage({
             )}
           </div>
 
-          {/* Source link */}
-          {listing.sourceUrl && (
-            <a
-              href={listing.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-center bg-slate-900 text-white py-3 rounded-lg hover:bg-slate-800 transition-colors"
-            >
-              View Original Listing
-            </a>
-          )}
+          {/* Contact form */}
+          <ContactForm
+            listingAddress={`${listing.address}, ${listing.city}, ${listing.state} ${listing.zip}`}
+          />
         </div>
       </div>
     </div>

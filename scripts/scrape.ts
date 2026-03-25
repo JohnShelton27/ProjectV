@@ -19,8 +19,8 @@ puppeteer.use(StealthPlugin());
 // ─── Config ───────────────────────────────────────────────
 const COUNTY = "Ventura";
 const STATE = "CA";
-const MAX_PAGES = 3;
-const DEFAULT_SOURCES = ["zillow", "trulia", "realtor", "redfin"];
+const MAX_PAGES = 35;
+const DEFAULT_SOURCES = ["zillow", "trulia", "realtor", "redfin", "mlslistings"];
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -43,6 +43,7 @@ interface RawListing {
   bathrooms: number;
   sqft: number;
   lotSize: string;
+  yearBuilt?: number;
   propertyType: string;
   images: string[];
   detailUrl: string;
@@ -388,12 +389,150 @@ async function scrapeTrulia(browser: Browser): Promise<RawListing[]> {
   return all;
 }
 
+// ─── MLSListings Scraper ─────────────────────────────────
+// MLSListings requires a form submission to establish a search session.
+// Direct URL access redirects to homepage.
+async function scrapeMlsListings(browser: Browser): Promise<RawListing[]> {
+  const all: RawListing[] = [];
+  const countySlug = `${COUNTY.toLowerCase()}-county`;
+
+  // Step 1: Visit homepage and submit search form to get session + criteria
+  const initPage = await newPage(browser);
+  let criteriaParam = "";
+
+  try {
+    console.log("  [MLSListings] Loading homepage for search session...");
+    await initPage.goto("https://www.mlslistings.com/", { waitUntil: "networkidle2", timeout: 60000 });
+    await delay(3000);
+
+    await initPage.evaluate((county: string) => {
+      const searchText = document.querySelector("#searchText") as HTMLInputElement;
+      const searchTextType = document.querySelector("#searchTextType") as HTMLInputElement;
+      if (searchText) searchText.value = `${county} County`;
+      if (searchTextType) searchTextType.value = "CountyOrParish";
+    }, COUNTY);
+
+    await Promise.all([
+      initPage.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }),
+      initPage.evaluate(() => {
+        const form = document.querySelector("#searchText")?.closest("form");
+        if (form) form.submit();
+      }),
+    ]);
+    await delay(3000);
+
+    const finalUrl = initPage.url();
+    const match = finalUrl.match(/criteria=([^&]+)/);
+    criteriaParam = match ? match[1] : "";
+
+    const count = await initPage.evaluate(() => document.querySelectorAll(".listing-card").length);
+    console.log(`  [MLSListings] Search session established (${count} cards on page 1)`);
+
+    if (!criteriaParam || count === 0) {
+      console.log("  [MLSListings] Failed to establish search session.");
+      return all;
+    }
+  } finally {
+    await initPage.close();
+  }
+
+  // Step 2: Scrape pages using the established session
+  for (let p = 1; p <= MAX_PAGES; p++) {
+    const page = await newPage(browser);
+    try {
+      const url = `https://www.mlslistings.com/Search/Result/${countySlug}/${p}?criteria=${criteriaParam}`;
+      console.log(`  [MLSListings] page ${p}...`);
+      await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+      await delay(5000);
+
+      const items = await page.evaluate(() => {
+        const out: Array<{
+          address: string; city: string; state: string; zip: string;
+          price: number; bedrooms: number; bathrooms: number; sqft: number;
+          lotSize: string; yearBuilt: number; propertyType: string;
+          images: string[]; detailUrl: string;
+        }> = [];
+
+        const cards = document.querySelectorAll(".listing-card");
+        for (const card of cards) {
+          const linkEl = card.querySelector('a.search-nav-link:not(.prerender)') as HTMLAnchorElement | null;
+          const fullAddress = linkEl?.textContent?.trim() || "";
+          const detailUrl = linkEl?.href || "";
+          if (!fullAddress) continue;
+
+          const parts = fullAddress.split(",").map((s: string) => s.trim());
+          const address = parts[0] || "";
+          const city = parts[1] || "";
+          const stateZip = parts[2] || "";
+          const stateCode = stateZip.replace(/\d/g, "").trim();
+          const zip = stateZip.match(/\d{5}/)?.[0] || "";
+
+          const priceEl = card.querySelector(".listing-price");
+          let price = 0;
+          if (priceEl) {
+            for (const node of priceEl.childNodes) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                price = parseInt((node.textContent || "").replace(/[^0-9]/g, ""), 10) || 0;
+                if (price > 0) break;
+              }
+            }
+          }
+          if (!address || price === 0) continue;
+
+          const infoItems = [...card.querySelectorAll(".listing-info-item")]
+            .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim());
+          const allText = infoItems.join(" | ");
+
+          const bedsMatch = allText.match(/(\d+)\s*Bd/);
+          const bathsMatch = allText.match(/(\d+\.?\d*)\s*Ba/);
+          const sqftMatch = allText.match(/([\d,]+)\s*Sq Ft(?!\s*Lot)/);
+          const lotMatch = allText.match(/([\d,.]+)\s*(Sq Ft|Acres)\s*Lot/);
+          const yearMatch = allText.match(/(\d{4})\s*Year Built/);
+
+          const typeEl = card.querySelector(".listing-type");
+          const imgEl = card.querySelector("img.listing-image") as HTMLImageElement | null;
+          // b-lazy uses data-src for real URL; src is a placeholder GIF
+          const imgSrc = imgEl?.getAttribute("data-src") || imgEl?.getAttribute("data-original") || imgEl?.src || "";
+          const isPlaceholder = !imgSrc || imgSrc.startsWith("data:");
+
+          out.push({
+            address, city, state: stateCode, zip, price,
+            bedrooms: bedsMatch ? parseInt(bedsMatch[1]) : 0,
+            bathrooms: bathsMatch ? parseFloat(bathsMatch[1]) : 0,
+            sqft: sqftMatch ? parseInt(sqftMatch[1].replace(/,/g, "")) : 0,
+            lotSize: lotMatch ? `${lotMatch[1]} ${lotMatch[2]} Lot` : "N/A",
+            yearBuilt: yearMatch ? parseInt(yearMatch[1]) : 0,
+            propertyType: typeEl?.textContent?.trim() || "Unknown",
+            images: isPlaceholder ? [] : [imgSrc],
+            detailUrl,
+          });
+        }
+        return out;
+      });
+
+      all.push(...items);
+      console.log(`  [MLSListings] page ${p}: ${items.length} listings`);
+      if (items.length === 0) {
+        console.log("  [MLSListings] No listings on this page, stopping.");
+        break;
+      }
+    } catch (e) {
+      console.error(`  [MLSListings] page ${p} error:`, (e as Error).message);
+    } finally {
+      await page.close();
+    }
+    await delay(3000 + Math.random() * 2000);
+  }
+  return all;
+}
+
 // ─── Main ─────────────────────────────────────────────────
 const scraperMap: Record<string, (b: Browser) => Promise<RawListing[]>> = {
   zillow: scrapeZillow,
   realtor: scrapeRealtor,
   redfin: scrapeRedfin,
   trulia: scrapeTrulia,
+  mlslistings: scrapeMlsListings,
 };
 
 async function main() {
@@ -482,7 +621,7 @@ async function main() {
       bathrooms: l.bathrooms,
       sqft: l.sqft,
       lot_size: l.lotSize,
-      year_built: 0,
+      year_built: l.yearBuilt || 0,
       property_type: l.propertyType,
       status: "active",
       description: "",

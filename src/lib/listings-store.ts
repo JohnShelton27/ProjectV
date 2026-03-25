@@ -1,6 +1,8 @@
 import { supabase, supabaseAdmin } from "./supabase";
 import type { Listing } from "@/types/listing";
 
+const PAGE_SIZE = 100;
+
 // Convert app Listing to DB row format
 function toRow(listing: Listing) {
   return {
@@ -66,10 +68,31 @@ function fromRow(row: any): Listing {
   };
 }
 
+// Apply sort to a query
+function applySort(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: any,
+  sort?: string
+) {
+  switch (sort) {
+    case "price-asc":
+      return query.order("price", { ascending: true });
+    case "price-desc":
+      return query.order("price", { ascending: false });
+    case "newest":
+      return query.order("listing_date", { ascending: false });
+    case "beds-desc":
+      return query.order("bedrooms", { ascending: false });
+    case "sqft-desc":
+      return query.order("sqft", { ascending: false });
+    default:
+      return query.order("listing_date", { ascending: false });
+  }
+}
+
 export async function saveListings(listings: Listing[]): Promise<void> {
   const rows = listings.map(toRow);
 
-  // Upsert: insert or update on conflict by id
   const { error } = await supabaseAdmin
     .from("listings")
     .upsert(rows, { onConflict: "id" });
@@ -80,18 +103,32 @@ export async function saveListings(listings: Listing[]): Promise<void> {
   }
 }
 
-export async function loadListings(): Promise<Listing[]> {
-  const { data, error } = await supabase
+export async function loadListings(
+  sort?: string,
+  page: number = 1
+): Promise<{ listings: Listing[]; total: number }> {
+  // Get total count
+  const { count } = await supabase
     .from("listings")
-    .select("*")
-    .order("listing_date", { ascending: false });
+    .select("*", { count: "exact", head: true });
+
+  let query = supabase.from("listings").select("*");
+  query = applySort(query, sort);
+
+  const from = (page - 1) * PAGE_SIZE;
+  query = query.range(from, from + PAGE_SIZE - 1);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("Failed to load listings:", error.message);
-    return [];
+    return { listings: [], total: 0 };
   }
 
-  return (data || []).map(fromRow);
+  return {
+    listings: (data || []).map(fromRow),
+    total: count || 0,
+  };
 }
 
 export async function getListingBySlug(
@@ -115,11 +152,28 @@ export async function getListingsByFilter(filter: {
   propertyType?: string;
   status?: string;
   city?: string;
-}): Promise<Listing[]> {
-  let query = supabase
+  sort?: string;
+  page?: number;
+}): Promise<{ listings: Listing[]; total: number }> {
+  // Build base filter for count
+  let countQuery = supabase
     .from("listings")
-    .select("*")
-    .order("listing_date", { ascending: false });
+    .select("*", { count: "exact", head: true });
+
+  if (filter.minPrice) countQuery = countQuery.gte("price", filter.minPrice);
+  if (filter.maxPrice) countQuery = countQuery.lte("price", filter.maxPrice);
+  if (filter.bedrooms) countQuery = countQuery.gte("bedrooms", filter.bedrooms);
+  if (filter.bathrooms) countQuery = countQuery.gte("bathrooms", filter.bathrooms);
+  if (filter.propertyType)
+    countQuery = countQuery.ilike("property_type", filter.propertyType);
+  if (filter.status) countQuery = countQuery.eq("status", filter.status);
+  if (filter.city) countQuery = countQuery.ilike("city", filter.city);
+
+  const { count } = await countQuery;
+
+  // Build data query
+  let query = supabase.from("listings").select("*");
+  query = applySort(query, filter.sort);
 
   if (filter.minPrice) query = query.gte("price", filter.minPrice);
   if (filter.maxPrice) query = query.lte("price", filter.maxPrice);
@@ -130,12 +184,36 @@ export async function getListingsByFilter(filter: {
   if (filter.status) query = query.eq("status", filter.status);
   if (filter.city) query = query.ilike("city", filter.city);
 
+  const page = filter.page || 1;
+  const from = (page - 1) * PAGE_SIZE;
+  query = query.range(from, from + PAGE_SIZE - 1);
+
   const { data, error } = await query;
 
   if (error) {
     console.error("Failed to filter listings:", error.message);
-    return [];
+    return { listings: [], total: 0 };
   }
 
-  return (data || []).map(fromRow);
+  return {
+    listings: (data || []).map(fromRow),
+    total: count || 0,
+  };
+}
+
+export async function getDistinctCities(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("listings")
+    .select("city")
+    .order("city");
+
+  if (error || !data) return [];
+
+  return [...new Set(
+    data
+      .map((r) => r.city)
+      .filter(Boolean)
+      .map((c: string) => c.replace(/_\d+$/, "").trim()) // strip trailing _2 etc.
+      .filter((c: string) => /^[A-Za-z]/.test(c)) // must start with a letter
+  )].sort();
 }

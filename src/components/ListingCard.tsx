@@ -22,11 +22,6 @@ export default function ListingCard({ listing }: { listing: Listing }) {
               {listing.status}
             </span>
           </div>
-          <div className="absolute top-3 right-3">
-            <span className="bg-black/60 text-white px-2.5 py-1 rounded-full text-xs">
-              {listing.source}
-            </span>
-          </div>
         </div>
         <div className="p-4">
           <div className="flex items-center justify-between mb-1">

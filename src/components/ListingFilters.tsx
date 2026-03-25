@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback } from "react";
 
-export default function ListingFilters() {
+export default function ListingFilters({ cities = [] }: { cities?: string[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -22,6 +22,18 @@ export default function ListingFilters() {
 
   return (
     <div className="flex flex-wrap gap-3 mb-8">
+      <select
+        className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+        value={searchParams.get("city") || ""}
+        onChange={(e) => updateFilter("city", e.target.value)}
+      >
+        <option value="">All Cities</option>
+        {cities.map((city) => (
+          <option key={city} value={city}>
+            {city}
+          </option>
+        ))}
+      </select>
       <select
         className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
         value={searchParams.get("beds") || ""}
@@ -64,6 +76,18 @@ export default function ListingFilters() {
         <option value="active">Active</option>
         <option value="pending">Pending</option>
         <option value="sold">Sold</option>
+      </select>
+      <select
+        className="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+        value={searchParams.get("sort") || ""}
+        onChange={(e) => updateFilter("sort", e.target.value)}
+      >
+        <option value="">Sort By</option>
+        <option value="price-asc">Price: Low to High</option>
+        <option value="price-desc">Price: High to Low</option>
+        <option value="newest">Newest</option>
+        <option value="beds-desc">Most Beds</option>
+        <option value="sqft-desc">Largest</option>
       </select>
     </div>
   );
