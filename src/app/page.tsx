@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { formatPrice } from "@/lib/format";
 import ListingCard from "@/components/ListingCard";
 import ListingFilters from "@/components/ListingFilters";
+import HeroSearch from "@/components/HeroSearch";
 import Pagination from "@/components/Pagination";
 
 export const dynamic = "force-dynamic";
@@ -97,8 +98,13 @@ export default async function HomePage({
             </p>
           </div>
 
+          {/* Search Box */}
+          <div className="mt-8">
+            <HeroSearch />
+          </div>
+
           {/* CTA buttons */}
-          <div className="flex flex-wrap gap-4 mt-8 animate-[fadeUp_0.8s_ease-out_0.2s_both]">
+          <div className="flex flex-wrap items-center gap-4 mt-6 animate-[fadeUp_0.8s_ease-out_0.3s_both]">
             <a
               href={`tel:${settings.agentPhone.replace(/[^0-9+]/g, "")}`}
               className="bg-blue-500 hover:bg-blue-400 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
