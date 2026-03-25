@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { getSettings } from "@/lib/settings";
-import Header from "@/components/Header";
+import HeaderWrapper from "@/components/HeaderWrapper";
 import Footer from "@/components/Footer";
 import PageTracker from "@/components/PageTracker";
 import "./globals.css";
@@ -39,7 +39,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
-        <Header />
+        <HeaderWrapper />
         <PageTracker />
         <main className="flex-1">{children}</main>
         <Footer />

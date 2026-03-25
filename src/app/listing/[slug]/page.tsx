@@ -8,6 +8,7 @@ import ImageGallery from "@/components/ImageGallery";
 import ContactForm from "@/components/ContactForm";
 import MortgageCalculator from "@/components/MortgageCalculator";
 import ShareButtons from "@/components/ShareButtons";
+import MobileCTA from "@/components/MobileCTA";
 import PageTracker from "@/components/PageTracker";
 
 export const dynamic = "force-dynamic";
@@ -99,7 +100,7 @@ export default async function ListingPage({
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-20 sm:pb-8">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -121,7 +122,7 @@ export default async function ListingPage({
         <div className="lg:col-span-2 space-y-8">
           {/* Header */}
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
               <div className="flex items-center gap-3">
                 <span
                   className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${getStatusColor(listing.status)}`}
@@ -248,6 +249,7 @@ export default async function ListingPage({
           <MortgageCalculator price={listing.price} />
         </div>
       </div>
+      <MobileCTA price={formatPrice(listing.price)} phone={settings.agentPhone} />
     </div>
   );
 }
