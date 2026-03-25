@@ -1,21 +1,23 @@
 import Link from "next/link";
-import { SITE_CONFIG } from "@/lib/config";
+import { getSettings } from "@/lib/settings";
 
-export default function Header() {
+export default async function Header() {
+  const settings = await getSettings();
+
   return (
     <header className="bg-slate-900 text-white shadow-lg">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-3">
             <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-sm">
-              VC
+              {settings.siteName.split(" ").map((w) => w[0]).join("").slice(0, 2)}
             </div>
             <div>
               <h1 className="text-lg font-semibold leading-tight">
-                {SITE_CONFIG.name}
+                {settings.siteName}
               </h1>
               <p className="text-xs text-slate-400">
-                {SITE_CONFIG.county}, {SITE_CONFIG.state}
+                {settings.agentName} &middot; {settings.agentLicense}
               </p>
             </div>
           </Link>
@@ -23,9 +25,12 @@ export default function Header() {
             <Link href="/" className="hover:text-blue-400 transition-colors">
               Listings
             </Link>
-            <Link href="/#about" className="hover:text-blue-400 transition-colors">
-              About
-            </Link>
+            <a
+              href={`tel:${settings.agentPhone.replace(/[^0-9+]/g, "")}`}
+              className="hover:text-blue-400 transition-colors"
+            >
+              {settings.agentPhone}
+            </a>
           </nav>
         </div>
       </div>

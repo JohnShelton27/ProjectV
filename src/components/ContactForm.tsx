@@ -1,12 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { AGENT_CONFIG } from "@/lib/config";
 
 export default function ContactForm({
   listingAddress,
+  agentName,
+  agentPhone,
+  agentLicense,
 }: {
   listingAddress: string;
+  agentName: string;
+  agentPhone: string;
+  agentLicense: string;
 }) {
   const [form, setForm] = useState({
     name: "",
@@ -46,7 +51,7 @@ export default function ContactForm({
           Message Sent!
         </h3>
         <p className="text-sm text-slate-500">
-          {AGENT_CONFIG.name} will get back to you shortly.
+          {agentName} will get back to you shortly.
         </p>
       </div>
     );
@@ -59,7 +64,7 @@ export default function ContactForm({
           Interested in this property?
         </h3>
         <p className="text-sm text-slate-500 mt-1">
-          Contact {AGENT_CONFIG.name} for a showing
+          Contact {agentName} for a showing
         </p>
       </div>
 
@@ -106,13 +111,13 @@ export default function ContactForm({
       <div className="border-t border-slate-100 pt-4 text-center space-y-1">
         <p className="text-sm text-slate-500">Or call directly</p>
         <a
-          href={`tel:${AGENT_CONFIG.phone.replace(/[^0-9+]/g, "")}`}
+          href={`tel:${agentPhone.replace(/[^0-9+]/g, "")}`}
           className="block text-lg font-semibold text-blue-600 hover:text-blue-700"
         >
-          {AGENT_CONFIG.phone}
+          {agentPhone}
         </a>
         <p className="text-xs text-slate-400">
-          {AGENT_CONFIG.name} &middot; {AGENT_CONFIG.licenseNumber}
+          {agentName} &middot; {agentLicense}
         </p>
       </div>
     </div>

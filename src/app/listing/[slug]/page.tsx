@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getListingBySlug, loadListings } from "@/lib/listings-store";
 import { formatPrice, formatNumber, formatDate, getStatusColor } from "@/lib/format";
+import { getSettings } from "@/lib/settings";
 import ImageGallery from "@/components/ImageGallery";
 import ContactForm from "@/components/ContactForm";
+import MortgageCalculator from "@/components/MortgageCalculator";
+import ShareButtons from "@/components/ShareButtons";
 import PageTracker from "@/components/PageTracker";
 
 export const dynamic = "force-dynamic";
@@ -13,20 +17,93 @@ export async function generateStaticParams() {
   return listings.map((listing) => ({ slug: listing.slug }));
 }
 
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const [listing, settings] = await Promise.all([
+    getListingBySlug(slug),
+    getSettings(),
+  ]);
+
+  if (!listing) return { title: "Listing Not Found" };
+
+  const title = `${listing.address}, ${listing.city}, ${listing.state} ${listing.zip} - ${formatPrice(listing.price)}`;
+  const description = `${listing.bedrooms} bed, ${listing.bathrooms} bath, ${listing.sqft > 0 ? `${formatNumber(listing.sqft)} sqft` : ""} ${listing.propertyType} for sale in ${listing.city}, ${listing.state}. Listed at ${formatPrice(listing.price)}. Contact ${settings.agentName} for details.`.replace(/  +/g, " ");
+  const image = listing.images?.[0];
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      ...(image ? { images: [{ url: image, width: 1200, height: 630, alt: listing.address }] } : {}),
+    },
+    twitter: {
+      card: image ? "summary_large_image" : "summary",
+      title,
+      description,
+      ...(image ? { images: [image] } : {}),
+    },
+  };
+}
+
 export default async function ListingPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const listing = await getListingBySlug(slug);
+  const [listing, settings] = await Promise.all([
+    getListingBySlug(slug),
+    getSettings(),
+  ]);
 
   if (!listing) {
     notFound();
   }
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "RealEstateListing",
+    name: `${listing.address}, ${listing.city}, ${listing.state} ${listing.zip}`,
+    description: listing.description || `${listing.propertyType} for sale in ${listing.city}`,
+    url: `/listing/${slug}`,
+    ...(listing.images?.[0] ? { image: listing.images[0] } : {}),
+    offers: {
+      "@type": "Offer",
+      price: listing.price,
+      priceCurrency: "USD",
+      availability: listing.status === "active" ? "https://schema.org/InStock" : "https://schema.org/SoldOut",
+    },
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: listing.address,
+      addressLocality: listing.city,
+      addressRegion: listing.state,
+      postalCode: listing.zip,
+      addressCountry: "US",
+    },
+    floorSize: listing.sqft > 0 ? {
+      "@type": "QuantitativeValue",
+      value: listing.sqft,
+      unitCode: "FTK",
+    } : undefined,
+    numberOfRooms: listing.bedrooms,
+    numberOfBathroomsTotal: listing.bathrooms,
+    datePosted: listing.listingDate,
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <PageTracker listingSlug={slug} />
       {/* Back link */}
       <Link
@@ -44,12 +121,22 @@ export default async function ListingPage({
         <div className="lg:col-span-2 space-y-8">
           {/* Header */}
           <div>
-            <div className="flex items-center gap-3 mb-2">
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${getStatusColor(listing.status)}`}
-              >
-                {listing.status}
-              </span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${getStatusColor(listing.status)}`}
+                >
+                  {listing.status}
+                </span>
+                <span className="text-sm text-slate-400">
+                  Added {formatDate(listing.listingDate)}
+                </span>
+              </div>
+              <ShareButtons
+                slug={slug}
+                address={`${listing.address}, ${listing.city}`}
+                price={formatPrice(listing.price)}
+              />
             </div>
             <h1 className="text-3xl font-bold text-slate-900 mb-1">
               {formatPrice(listing.price)}
@@ -76,28 +163,71 @@ export default async function ListingPage({
             />
           </div>
 
-          {/* Description */}
-          {listing.description && (
-            <div>
-              <h2 className="text-xl font-semibold mb-3">About this property</h2>
-              <p className="text-slate-600 leading-relaxed whitespace-pre-line">
-                {listing.description}
-              </p>
+          {/* Price highlights */}
+          {listing.sqft > 0 && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-wrap gap-6">
+              <div>
+                <p className="text-xs text-blue-600 font-medium">Price per Sq Ft</p>
+                <p className="text-lg font-bold text-blue-900">
+                  {formatPrice(Math.round(listing.price / listing.sqft))}
+                </p>
+              </div>
+              {listing.lotSize && listing.lotSize !== "N/A" && (
+                <div>
+                  <p className="text-xs text-blue-600 font-medium">Lot Size</p>
+                  <p className="text-lg font-bold text-blue-900">{listing.lotSize}</p>
+                </div>
+              )}
+              {listing.propertyType && listing.propertyType !== "Unknown" && (
+                <div>
+                  <p className="text-xs text-blue-600 font-medium">Property Type</p>
+                  <p className="text-lg font-bold text-blue-900">{listing.propertyType}</p>
+                </div>
+              )}
             </div>
           )}
 
+          {/* Description */}
+          {listing.description && (
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-xl font-semibold mb-4">About this property</h2>
+              <div className="text-slate-600 leading-relaxed whitespace-pre-line">
+                {listing.description}
+              </div>
+            </div>
+          )}
+
+          {/* Property Details Table */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-xl font-semibold mb-4">Property Details</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Property Type" value={listing.propertyType} />
+              <DetailRow label="Bedrooms" value={listing.bedrooms.toString()} />
+              <DetailRow label="Bathrooms" value={listing.bathrooms.toString()} />
+              <DetailRow label="Sq Ft" value={listing.sqft > 0 ? formatNumber(listing.sqft) : "N/A"} />
+              <DetailRow label="Lot Size" value={listing.lotSize} />
+              <DetailRow label="Year Built" value={listing.yearBuilt > 0 ? listing.yearBuilt.toString() : "N/A"} />
+              <DetailRow label="County" value={listing.county} />
+              <DetailRow label="Added" value={formatDate(listing.listingDate)} />
+              {listing.taxInfo && (
+                <>
+                  <DetailRow label="Annual Tax" value={formatPrice(listing.taxInfo.annualTax)} />
+                  <DetailRow label="Assessed Value" value={formatPrice(listing.taxInfo.assessedValue)} />
+                </>
+              )}
+            </div>
+          </div>
+
           {/* Features */}
           {listing.features.length > 0 && (
-            <div>
-              <h2 className="text-xl font-semibold mb-3">Features</h2>
-              <div className="flex flex-wrap gap-2">
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-xl font-semibold mb-4">Features & Amenities</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {listing.features.map((feature, i) => (
-                  <span
-                    key={i}
-                    className="bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-sm"
-                  >
+                  <div key={i} className="flex items-center gap-2 text-sm text-slate-700">
+                    <span className="text-blue-500 flex-shrink-0">&#10003;</span>
                     {feature}
-                  </span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -106,31 +236,16 @@ export default async function ListingPage({
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Property details card */}
-          <div className="bg-white rounded-xl shadow-md p-6 space-y-4">
-            <h3 className="font-semibold text-lg">Property Details</h3>
-            <DetailRow label="Property Type" value={listing.propertyType} />
-            <DetailRow label="Lot Size" value={listing.lotSize} />
-            <DetailRow label="County" value={listing.county} />
-            <DetailRow label="Listed" value={formatDate(listing.listingDate)} />
-            {listing.taxInfo && (
-              <>
-                <DetailRow
-                  label="Annual Tax"
-                  value={formatPrice(listing.taxInfo.annualTax)}
-                />
-                <DetailRow
-                  label="Assessed Value"
-                  value={formatPrice(listing.taxInfo.assessedValue)}
-                />
-              </>
-            )}
-          </div>
-
           {/* Contact form */}
           <ContactForm
             listingAddress={`${listing.address}, ${listing.city}, ${listing.state} ${listing.zip}`}
+            agentName={settings.agentName}
+            agentPhone={settings.agentPhone}
+            agentLicense={settings.agentLicense}
           />
+
+          {/* Mortgage Calculator */}
+          <MortgageCalculator price={listing.price} />
         </div>
       </div>
     </div>

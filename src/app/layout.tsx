@@ -1,14 +1,35 @@
 import type { Metadata } from "next";
-import { SITE_CONFIG } from "@/lib/config";
+import { getSettings } from "@/lib/settings";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import PageTracker from "@/components/PageTracker";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: SITE_CONFIG.name,
-  description: SITE_CONFIG.description,
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const settings = await getSettings();
+  return {
+    title: {
+      default: settings.siteName,
+      template: `%s | ${settings.siteName}`,
+    },
+    description: settings.siteDescription,
+    openGraph: {
+      title: settings.siteName,
+      description: settings.siteDescription,
+      type: "website",
+      siteName: settings.siteName,
+    },
+    twitter: {
+      card: "summary",
+      title: settings.siteName,
+      description: settings.siteDescription,
+    },
+    robots: {
+      index: true,
+      follow: true,
+    },
+  };
+}
 
 export default function RootLayout({
   children,

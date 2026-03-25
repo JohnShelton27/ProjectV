@@ -14,6 +14,12 @@ export default function AdminLayout({
           <a href="/admin/leads" className="text-sm text-slate-300 hover:text-white">
             Leads
           </a>
+          <a href="/admin/featured" className="text-sm text-slate-300 hover:text-white">
+            Featured
+          </a>
+          <a href="/admin/settings" className="text-sm text-slate-300 hover:text-white">
+            Settings
+          </a>
         </div>
         <div className="flex items-center gap-4">
           <a href="/" className="text-sm text-slate-400 hover:text-white">

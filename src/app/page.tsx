@@ -1,16 +1,40 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import {
   loadListings,
   getListingsByFilter,
   getDistinctCities,
 } from "@/lib/listings-store";
-import { SITE_CONFIG } from "@/lib/config";
+import { getSettings } from "@/lib/settings";
+import { supabase } from "@/lib/supabase";
+import { formatPrice } from "@/lib/format";
 import ListingCard from "@/components/ListingCard";
 import ListingFilters from "@/components/ListingFilters";
-
 import Pagination from "@/components/Pagination";
 
 export const dynamic = "force-dynamic";
+
+async function getFeaturedListings() {
+  // First try admin-curated featured listings
+  const { data: curated } = await supabase
+    .from("listings")
+    .select("*")
+    .eq("featured", true)
+    .order("price", { ascending: false })
+    .limit(6);
+
+  if (curated && curated.length > 0) return curated;
+
+  // Fallback: top 3 by price if no featured set
+  const { data } = await supabase
+    .from("listings")
+    .select("*")
+    .eq("status", "active")
+    .not("images", "eq", "{}")
+    .order("price", { ascending: false })
+    .limit(3);
+  return data || [];
+}
 
 export default async function HomePage({
   searchParams,
@@ -34,52 +58,183 @@ export default async function HomePage({
       })
     : await loadListings(params.sort, page);
 
-  const allCities = await getDistinctCities();
+  const [allCities, settings, featured] = await Promise.all([
+    getDistinctCities(),
+    getSettings(),
+    page === 1 && !hasFilters ? getFeaturedListings() : Promise.resolve([]),
+  ]);
   const totalPages = Math.ceil(total / 100);
+  const showFeatured = page === 1 && !hasFilters && featured.length > 0;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Hero */}
-      <div className="mb-10">
-        <h2 className="text-3xl font-bold text-slate-900 mb-2">
-          {SITE_CONFIG.county} Real Estate
-        </h2>
-        <p className="text-slate-600 mb-6">
-          Browse {total > 0 ? total : ""} properties for sale in{" "}
-          {SITE_CONFIG.county}, {SITE_CONFIG.state}
-        </p>
+    <>
+      {/* Hero Section */}
+      <section className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white overflow-hidden">
+        {/* Animated gradient orbs */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute -top-40 -left-40 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl animate-[float_8s_ease-in-out_infinite]" />
+          <div className="absolute top-20 -right-20 w-60 h-60 bg-indigo-500/15 rounded-full blur-3xl animate-[float_6s_ease-in-out_infinite_reverse]" />
+          <div className="absolute -bottom-20 left-1/3 w-72 h-72 bg-cyan-500/10 rounded-full blur-3xl animate-[float_10s_ease-in-out_infinite_2s]" />
+        </div>
+        {/* Subtle grid pattern */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{
+          backgroundImage: "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)",
+          backgroundSize: "60px 60px",
+        }} />
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
+          <div className="max-w-3xl animate-[fadeUp_0.8s_ease-out]">
+            <h2 className="text-4xl sm:text-5xl font-bold tracking-tight mb-4">
+              Find Your Dream Home in
+              <span className="bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent"> Ventura County</span>
+            </h2>
+            <p className="text-lg sm:text-xl text-slate-300 mb-2">
+              {total > 0
+                ? `${total.toLocaleString()} properties available in Ventura County`
+                : settings.siteDescription}
+            </p>
+            <p className="text-sm text-slate-400">
+              {settings.agentName} &middot; {settings.agentBrokerage} &middot; {settings.agentLicense}
+            </p>
+          </div>
+
+          {/* CTA buttons */}
+          <div className="flex flex-wrap gap-4 mt-8 animate-[fadeUp_0.8s_ease-out_0.2s_both]">
+            <a
+              href={`tel:${settings.agentPhone.replace(/[^0-9+]/g, "")}`}
+              className="bg-blue-500 hover:bg-blue-400 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+            >
+              Call {settings.agentPhone}
+            </a>
+            <a
+              href={`mailto:${settings.agentEmail}`}
+              className="border border-white/30 text-white font-semibold px-6 py-3 rounded-lg hover:bg-white/10 transition-colors"
+            >
+              Email {settings.agentName}
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Featured Listings */}
+      {showFeatured && (
+        <section className="bg-white border-b border-slate-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Featured Properties</h3>
+                <p className="text-sm text-slate-500">Premium listings in Ventura County</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {featured.map((row) => (
+                <Link
+                  key={row.id}
+                  href={`/listing/${row.slug}`}
+                  className="group relative rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-300"
+                >
+                  <div className="aspect-[4/3] overflow-hidden">
+                    <img
+                      src={row.images?.[0] || ""}
+                      alt={row.address}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                  <div className="absolute bottom-0 left-0 right-0 p-5">
+                    <p className="text-2xl font-bold text-white mb-1">
+                      {formatPrice(row.price)}
+                    </p>
+                    <p className="text-sm text-white/90 truncate">
+                      {row.address}, {row.city}
+                    </p>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-white/75">
+                      {row.bedrooms > 0 && <span>{row.bedrooms} bd</span>}
+                      {row.bathrooms > 0 && <span>{row.bathrooms} ba</span>}
+                      {row.sqft > 0 && <span>{row.sqft.toLocaleString()} sqft</span>}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Main Listings Section */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Section Header + Filters */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-2xl font-bold text-slate-900">
+              {hasFilters ? "Search Results" : "All Listings"}
+            </h3>
+            <p className="text-sm text-slate-500">
+              {total > 0 ? `${total.toLocaleString()} properties found` : "No properties match your criteria"}
+              {page > 1 ? ` — Page ${page}` : ""}
+            </p>
+          </div>
+        </div>
+
+        <Suspense fallback={null}>
+          <ListingFilters cities={allCities} />
+        </Suspense>
+
+        {/* Listing Grid */}
+        {listings.length > 0 ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {listings.map((listing) => (
+                <ListingCard key={listing.id} listing={listing} />
+              ))}
+            </div>
+            {totalPages > 1 && (
+              <Suspense fallback={null}>
+                <Pagination currentPage={page} totalPages={totalPages} />
+              </Suspense>
+            )}
+          </>
+        ) : (
+          <div className="text-center py-20">
+            <div className="text-5xl mb-4">&#127968;</div>
+            <h3 className="text-xl font-semibold text-slate-700 mb-2">
+              No listings available
+            </h3>
+            <p className="text-slate-500 mb-6">
+              Check back soon for the latest properties.
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Filters */}
-      <Suspense fallback={null}>
-        <ListingFilters cities={allCities} />
-      </Suspense>
-
-      {/* Listing Grid */}
-      {listings.length > 0 ? (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {listings.map((listing) => (
-              <ListingCard key={listing.id} listing={listing} />
-            ))}
+      {/* CTA Section */}
+      <section className="bg-gradient-to-r from-blue-600 to-blue-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="text-center sm:text-left">
+              <h3 className="text-2xl font-bold text-white mb-2">
+                Ready to find your perfect home?
+              </h3>
+              <p className="text-blue-100">
+                Contact {settings.agentName} for personalized assistance with your home search.
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              <a
+                href={`tel:${settings.agentPhone.replace(/[^0-9+]/g, "")}`}
+                className="bg-white text-blue-600 font-semibold px-6 py-3 rounded-lg hover:bg-blue-50 transition-colors whitespace-nowrap"
+              >
+                Call {settings.agentPhone}
+              </a>
+              <a
+                href={`mailto:${settings.agentEmail}`}
+                className="border-2 border-white text-white font-semibold px-6 py-3 rounded-lg hover:bg-white/10 transition-colors whitespace-nowrap"
+              >
+                Send Email
+              </a>
+            </div>
           </div>
-          {totalPages > 1 && (
-            <Suspense fallback={null}>
-              <Pagination currentPage={page} totalPages={totalPages} />
-            </Suspense>
-          )}
-        </>
-      ) : (
-        <div className="text-center py-20">
-          <div className="text-5xl mb-4">&#127968;</div>
-          <h3 className="text-xl font-semibold text-slate-700 mb-2">
-            No listings available
-          </h3>
-          <p className="text-slate-500 mb-6">
-            Check back soon for the latest properties in {SITE_CONFIG.county}.
-          </p>
         </div>
-      )}
-    </div>
+      </section>
+    </>
   );
 }
