@@ -4,7 +4,7 @@ export const SCRAPER_CONFIG: ScraperConfig = {
   county: "Ventura",
   state: "California",
   maxPages: 35,
-  sources: ["zillow", "realtor", "redfin", "trulia", "mlslistings"],
+  sources: ["mlslistings"],
 };
 
 export const SITE_CONFIG = {

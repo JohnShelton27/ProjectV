@@ -1,16 +1,8 @@
 import type { Listing, ScrapeResult } from "@/types/listing";
-import { scrapeZillow } from "./zillow";
-import { scrapeRealtor } from "./realtor";
-import { scrapeTrulia } from "./trulia";
-import { scrapeRedfin } from "./redfin";
 import { scrapeMlsListings } from "./mlslistings";
 import { closeBrowser } from "./browser";
 
 const scraperMap: Record<string, (county: string, state: string, maxPages: number) => Promise<ScrapeResult>> = {
-  zillow: scrapeZillow,
-  realtor: scrapeRealtor,
-  trulia: scrapeTrulia,
-  redfin: scrapeRedfin,
   mlslistings: scrapeMlsListings,
 };
 
@@ -26,7 +18,6 @@ export async function scrapeAll(config: {
   const allResults: ScrapeResult[] = [];
   const allListings: Listing[] = [];
 
-  // Run scrapers sequentially to avoid overwhelming the browser
   for (const source of config.sources) {
     const scraper = scraperMap[source];
     if (!scraper) {
@@ -57,7 +48,6 @@ export async function scrapeAll(config: {
     }
   }
 
-  // Close the shared browser instance
   await closeBrowser();
 
   // Deduplicate by normalized address
@@ -74,8 +64,4 @@ export async function scrapeAll(config: {
   return { listings: deduplicated, results: allResults };
 }
 
-export { scrapeZillow } from "./zillow";
-export { scrapeRealtor } from "./realtor";
-export { scrapeTrulia } from "./trulia";
-export { scrapeRedfin } from "./redfin";
 export { scrapeMlsListings } from "./mlslistings";
