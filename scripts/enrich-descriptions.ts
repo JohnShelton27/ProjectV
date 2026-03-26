@@ -202,52 +202,77 @@ async function main() {
     process.exit(0);
   }
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--window-size=1920,1080",
-    ],
-  });
+  const RESTART_EVERY = 50;
 
+  async function launchBrowser() {
+    return puppeteer.launch({
+      headless: true,
+      protocolTimeout: 60000,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--single-process",
+        "--no-zygote",
+        "--window-size=1920,1080",
+      ],
+    });
+  }
+
+  let browser = await launchBrowser();
   let updated = 0;
   let failed = 0;
 
   for (let i = 0; i < needsDesc.length; i++) {
+    // Restart browser periodically to avoid memory/protocol issues
+    if (i > 0 && i % RESTART_EVERY === 0) {
+      console.log(`  [Restarting browser at ${i}/${needsDesc.length}]`);
+      try { await browser.close(); } catch { /* ignore */ }
+      await delay(2000);
+      browser = await launchBrowser();
+    }
+
     const listing = needsDesc[i];
     const pct = ((i + 1) / needsDesc.length * 100).toFixed(0);
     process.stdout.write(
       `  [${i + 1}/${needsDesc.length}] (${pct}%) ${listing.address} (${listing.source})... `
     );
 
-    const description = await fetchDescription(browser, listing.source_url);
+    try {
+      const description = await fetchDescription(browser, listing.source_url);
 
-    if (description.length > 30) {
-      const { error: updateError } = await supabase
-        .from("listings")
-        .update({ description })
-        .eq("id", listing.id);
+      if (description.length > 30) {
+        const { error: updateError } = await supabase
+          .from("listings")
+          .update({ description })
+          .eq("id", listing.id);
 
-      if (updateError) {
-        console.log(`ERROR: ${updateError.message}`);
-        failed++;
+        if (updateError) {
+          console.log(`ERROR: ${updateError.message}`);
+          failed++;
+        } else {
+          console.log(`${description.length} chars`);
+          updated++;
+        }
       } else {
-        console.log(`${description.length} chars`);
-        updated++;
+        console.log("no description found");
+        failed++;
       }
-    } else {
-      console.log("no description found");
+    } catch (err) {
+      console.log(`CRASH: ${err instanceof Error ? err.message : err}`);
       failed++;
+      // Try to recover browser
+      try { await browser.close(); } catch { /* ignore */ }
+      await delay(2000);
+      browser = await launchBrowser();
     }
 
     // Random delay between requests
     await delay(1500 + Math.random() * 2000);
   }
 
-  await browser.close();
+  try { await browser.close(); } catch { /* ignore */ }
 
   console.log(`\n--- DONE ---`);
   console.log(`  Updated: ${updated}`);

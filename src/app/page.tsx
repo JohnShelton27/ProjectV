@@ -44,6 +44,7 @@ export default async function HomePage({
 }) {
   const params = await searchParams;
   const page = params.page ? Number(params.page) : 1;
+  const showAll = params.showAll === "true";
   const hasFilters =
     params.beds || params.baths || params.maxPrice || params.status || params.city;
 
@@ -118,6 +119,24 @@ export default async function HomePage({
               Email {settings.agentName}
             </a>
           </div>
+
+          {/* City links */}
+          {allCities.length > 0 && (
+            <div className="mt-8 animate-[fadeUp_0.8s_ease-out_0.5s_both]">
+              <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Browse by City</p>
+              <div className="flex flex-wrap gap-2">
+                {allCities.map((city) => (
+                  <Link
+                    key={city}
+                    href={`/homes-for-sale/${city.toLowerCase().replace(/\s+/g, "-")}`}
+                    className="text-xs px-3 py-1.5 rounded-full bg-white/10 text-slate-300 hover:bg-white/20 hover:text-white transition-colors"
+                  >
+                    {city}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -189,15 +208,24 @@ export default async function HomePage({
         {listings.length > 0 ? (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {listings.map((listing) => (
+              {(page === 1 && !hasFilters && !showAll ? listings.slice(0, 12) : listings).map((listing) => (
                 <ListingCard key={listing.id} listing={listing} />
               ))}
             </div>
-            {totalPages > 1 && (
+            {page === 1 && !hasFilters && !showAll && listings.length > 12 ? (
+              <div className="text-center mt-8">
+                <Link
+                  href="/?showAll=true"
+                  className="inline-block bg-blue-600 text-white font-semibold px-8 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  View All {total.toLocaleString()} Listings
+                </Link>
+              </div>
+            ) : totalPages > 1 ? (
               <Suspense fallback={null}>
                 <Pagination currentPage={page} totalPages={totalPages} />
               </Suspense>
-            )}
+            ) : null}
           </>
         ) : (
           <div className="text-center py-20">
