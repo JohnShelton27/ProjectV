@@ -635,15 +635,57 @@ async function main() {
     };
   });
 
-  // Upsert in batches of 50
-  for (let i = 0; i < rows.length; i += 50) {
-    const batch = rows.slice(i, i + 50);
+  // Fetch existing listing IDs so we can separate inserts from updates
+  const existingIds = new Set<string>();
+  const allIds = rows.map((r) => r.id);
+  for (let i = 0; i < allIds.length; i += 200) {
+    const batch = allIds.slice(i, i + 200);
+    const { data: existingRows } = await supabase
+      .from("listings")
+      .select("id")
+      .in("id", batch);
+    if (existingRows) {
+      for (const r of existingRows) existingIds.add(r.id);
+    }
+  }
+
+  const newRows = rows.filter((r) => !existingIds.has(r.id));
+  const existingToUpdate = rows.filter((r) => existingIds.has(r.id));
+
+  console.log(`  New listings: ${newRows.length}, Existing to update: ${existingToUpdate.length}`);
+
+  // Insert new listings with all fields
+  for (let i = 0; i < newRows.length; i += 50) {
+    const batch = newRows.slice(i, i + 50);
     const { error } = await supabase.from("listings").upsert(batch, { onConflict: "id" });
     if (error) {
-      console.error(`  Batch ${i / 50 + 1} error:`, error.message);
+      console.error(`  Insert batch ${i / 50 + 1} error:`, error.message);
     } else {
-      console.log(`  Batch ${i / 50 + 1}: ${batch.length} rows upserted`);
+      console.log(`  Inserted batch ${i / 50 + 1}: ${batch.length} new listings`);
     }
+  }
+
+  // Update existing listings — only price, status, and basic info (preserve images, description, listing_date)
+  for (let i = 0; i < existingToUpdate.length; i += 50) {
+    const batch = existingToUpdate.slice(i, i + 50);
+    for (const row of batch) {
+      const { error } = await supabase
+        .from("listings")
+        .update({
+          price: row.price,
+          status: row.status,
+          bedrooms: row.bedrooms,
+          bathrooms: row.bathrooms,
+          sqft: row.sqft,
+          lot_size: row.lot_size,
+          property_type: row.property_type,
+        })
+        .eq("id", row.id);
+      if (error) {
+        console.error(`  Update error for ${row.address}:`, error.message);
+      }
+    }
+    console.log(`  Updated batch ${i / 50 + 1}: ${batch.length} existing listings`);
   }
 
   console.log("\nDone! Listings are live on your site.\n");
