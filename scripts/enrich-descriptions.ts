@@ -173,6 +173,7 @@ async function main() {
     .select("id, address, source, source_url, description")
     .not("source_url", "eq", "")
     .not("source_url", "is", null)
+    .or("description.is.null,description.eq.")
     .order("listing_date", { ascending: false });
 
   if (sourceFilter) {
@@ -188,10 +189,7 @@ async function main() {
     process.exit(1);
   }
 
-  // Filter to only those without descriptions
-  const needsDesc = (listings || []).filter(
-    (l) => !l.description || l.description.trim().length === 0
-  );
+  const needsDesc = listings || [];
 
   console.log(
     `\n📝 Enriching descriptions for ${needsDesc.length} listings${sourceFilter ? ` (source: ${sourceFilter})` : ""}\n`

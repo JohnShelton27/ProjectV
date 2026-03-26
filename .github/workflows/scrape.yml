@@ -35,14 +35,16 @@ jobs:
 
       - name: Enrich photos
         continue-on-error: true
+        timeout-minutes: 20
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npx tsx scripts/enrich-photos.ts
+        run: npx tsx scripts/enrich-photos.ts --limit=100
 
       - name: Enrich descriptions
         continue-on-error: true
+        timeout-minutes: 20
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npx tsx scripts/enrich-descriptions.ts
+        run: npx tsx scripts/enrich-descriptions.ts --limit=100
